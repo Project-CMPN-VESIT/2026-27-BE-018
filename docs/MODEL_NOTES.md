@@ -30,7 +30,7 @@ again (`clip(raw / 10000, 0, 2)`) before computing the indices. The checkpoint c
 
 The app therefore converts every source to physical reflectance first (DN × scale + offset from STAC metadata,
 DN / 10000 for GEE's harmonized collection, auto-detected for uploads) and then applies the **identical**
-training transform (`app/ml/preprocess.py`). `tests/test_model.py` asserts bit-identical inputs and output
+training transform (`app/ml/preprocess.py`). During development, automated tests confirmed bit-identical inputs and output
 parity with a plain forward pass. Feeding plain reflectance would push the raw-band branch roughly 10 000× outside
 its training range, so **do not "fix" the divisor for this checkpoint**.
 

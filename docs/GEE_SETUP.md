@@ -2,7 +2,7 @@
 
 STAC works with no setup. Enable GEE if you prefer Google's catalogue or STAC is blocked on your network.
 
-## Option A: service account (recommended; works in Docker and unattended)
+## Option A: service account (recommended; works unattended)
 
 1. **Google Cloud project**: create or pick one at https://console.cloud.google.com and note its **project ID**.
 2. **Enable the Earth Engine API** for the project (APIs & Services → Library → "Google Earth Engine API").
@@ -11,18 +11,17 @@ STAC works with no setup. Enable GEE if you prefer Google's catalogue or STAC is
 4. **Service account**: IAM & Admin → Service Accounts → *Create*. Grant it the roles
    **Earth Engine Resource Viewer** and **Service Usage Consumer**.
 5. **Key**: open the service account → Keys → *Add key* → JSON. Save the file as `secrets\gee-key.json`.
-   Treat it as a password: it is git-ignored and mounted read-only in Docker.
+   Treat it as a password: it is git-ignored.
 6. **Configure** `.env`:
 
    ```ini
    GLN_GEE_ENABLED=true
    GLN_GEE_PROJECT=your-project-id
    GLN_GEE_SERVICE_ACCOUNT=name@your-project-id.iam.gserviceaccount.com
-   # local run (Docker ignores this and uses /secrets/gee-key.json):
-   GLN_GEE_KEY_FILE=D:\GLN\secrets\gee-key.json
+   GLN_GEE_KEY_FILE=D:\GLN\GeoLitterNet-Watch\gln\secrets\gee-key.json
    ```
-7. **Verify**: `.\scripts\selfcheck.ps1 -Live -Provider gee`, then restart the app. "Google Earth Engine" becomes
-   selectable under *Imagery → Source*. To make it the default, set `GLN_DEFAULT_PROVIDER=gee`.
+7. **Verify**: restart the app; "Google Earth Engine" becomes selectable under *Imagery → Source*. To make it
+   the default, set `GLN_DEFAULT_PROVIDER=gee`.
 
 ## Option B: your own Google login (local only)
 

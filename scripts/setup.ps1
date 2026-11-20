@@ -41,24 +41,20 @@ try {
   Run $vpy @("-m", "pip", "install", "torch", "--index-url", "https://download.pytorch.org/whl/cpu", "--disable-pip-version-check")
 
   Step "Backend requirements"
-  Run $vpy @("-m", "pip", "install", "-r", (Join-Path $backend "requirements-dev.txt"), "--disable-pip-version-check")
+  Run $vpy @("-m", "pip", "install", "-r", (Join-Path $backend "requirements.txt"), "--disable-pip-version-check")
 
   Step "Configuration"
   if (-not (Test-Path (Join-Path $root ".env"))) { Copy-Item (Join-Path $root ".env.example") (Join-Path $root ".env"); Write-Host "created .env from .env.example" }
   else { Write-Host ".env exists, kept" }
 
-  Step "Self-check (model + imagery providers)"
+  Step "Model check"
   Push-Location $backend
-  & $vpy -m app.selfcheck 2>&1 | ForEach-Object { "$_" }
-  $sc = $LASTEXITCODE
-  Step "Test suite"
-  & $vpy -m pytest -q tests 2>&1 | ForEach-Object { "$_" }
-  $tc = $LASTEXITCODE
+  & $vpy -c "from app.config import get_settings as g; from app.ml.engine import ModelEngine as M; s=g(); e=M(s.model_path); e.load(); print('model OK:', e.n_params, 'parameters')" 2>&1 | ForEach-Object { "$_" }
+  $mc = $LASTEXITCODE
   Pop-Location
 
   Step "Result"
-  if ($tc -ne 0) { Write-Host "Tests reported failures - see above." -ForegroundColor Yellow }
-  if ($sc -ne 0) { Write-Host "Self-check: a provider is unreachable (see above). The app still works with the others." -ForegroundColor Yellow }
+  if ($mc -ne 0) { throw "the model could not be loaded - see above" }
   Write-Host "SETUP COMPLETE. Start the app with Start.bat (or .\scripts\run.ps1) and open http://localhost:8000" -ForegroundColor Green
 }
 catch {

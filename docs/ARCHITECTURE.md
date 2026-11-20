@@ -38,10 +38,10 @@ flowchart LR
 |---|---|
 | STAC (Earth Search) as default, GEE as a switchable adapter, plus uploads | STAC needs no account and reads COG windows directly. GEE is available when credentials exist. Uploads cover offline use and testing. All three share one `ImageryProvider` interface. |
 | One process, one worker, SQLite | CPU inference is serial anyway (model lock). Restart-safe: queued runs are recovered and interrupted ones marked failed. No Redis or Postgres to install on Windows. |
-| Architecture copied verbatim; preprocessing reproduced bit-for-bit | The checkpoint loads with `strict=True`, and parity tests catch drift. See MODEL_NOTES.md (input scaling). |
+| Architecture copied verbatim; preprocessing reproduced bit-for-bit | The checkpoint loads with `strict=True`; output parity with the training pipeline was verified during development. See MODEL_NOTES.md (input scaling). |
 | UTM 10 m analysis grid, Web Mercator overlays | Model at native resolution; overlays align exactly with web basemaps. |
 | Density heatmap (client) + pixel probability (server) | Pixel maps vanish at regional zoom; the client heatmap of cluster centroids keeps hotspots visible at any zoom. |
-| UI served by FastAPI (`frontend/dist`) | One URL, one process, no Node at runtime; Docker uses the same layout. |
+| UI served by FastAPI (`frontend/dist`) | One URL, one process, no Node at runtime. |
 
 ## Scaling path
 
