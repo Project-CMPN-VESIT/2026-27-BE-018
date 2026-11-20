@@ -6,6 +6,7 @@ Scene id format: "<item_id>[,<item_id>...]".
 from __future__ import annotations
 
 import logging
+import threading
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
@@ -75,6 +76,7 @@ class StacProvider(ImageryProvider):
         self.url, self.collection, self.timeout_s = url, collection, timeout_s
         self.label = f"Sentinel-2 L2A (STAC: {url.split('//')[-1].split('/')[0]})"
         self._client: Optional[Client] = None
+        self._items_seen: dict[str, object] = {}   # items from recent searches: load() can skip a second lookup
 
     def _cl(self) -> Client:
         if self._client is None:
@@ -93,9 +95,13 @@ class StacProvider(ImageryProvider):
                               datetime=f"{start.isoformat()}/{end.isoformat()}",
                               query={"eo:cloud_cover": {"lte": max_cloud}}, max_items=300)
         try:
-            return list(s.items())
+            items = list(s.items())
         except Exception as e:
             raise ProviderError(f"STAC search failed: {e}") from e
+        if len(self._items_seen) > 5000:
+            self._items_seen.clear()
+        self._items_seen.update({i.id: i for i in items})
+        return items
 
     def search(self, aoi: BaseGeometry, start: date, end: date, max_cloud: float, limit: int) -> list[SceneInfo]:
         groups: dict[tuple[str, str], list] = defaultdict(list)
@@ -124,42 +130,50 @@ class StacProvider(ImageryProvider):
         ids = [s for s in scene_id.split(",") if s]
         if not ids:
             raise ProviderError("empty scene id")
-        try:
-            items = list(self._cl().search(collections=[self.collection], ids=ids).items())
-        except ProviderError:
-            raise
-        except Exception as e:
-            raise ProviderError(f"STAC lookup failed: {e}") from e
+        items = [self._items_seen[i] for i in ids if i in self._items_seen]
+        if len(items) != len(ids):
+            try:
+                items = list(self._cl().search(collections=[self.collection], ids=ids).items())
+            except ProviderError:
+                raise
+            except Exception as e:
+                raise ProviderError(f"STAC lookup failed: {e}") from e
         if not items:
             raise ProviderError(f"scene not found in {self.collection}: {scene_id}")
-        items = [i for i in items if shape(i.geometry).intersects(aoi)] or items
+        items = sorted([i for i in items if shape(i.geometry).intersects(aoi)] or items, key=lambda i: i.id)
         epsgs = Counter(e for e in (_epsg(i) for i in items) if e)
         grid = grid_for(aoi, epsgs.most_common(1)[0][0] if epsgs else None)
 
+        jobs = [(k, item, b) for k, item in enumerate(items) for b in BAND_IDS + ["SCL"]]
+        done = [0]
+        lock = threading.Lock()
+
+        def read_band(job) -> tuple[int, str, np.ndarray]:
+            k, item, b = job
+            a = _asset(item, b)
+            if b == "SCL":
+                arr = read_to_grid(a.href, grid, Resampling.nearest, dtype="uint8")
+            else:
+                dn = read_to_grid(a.href, grid, Resampling.bilinear, dtype="float32")
+                scale, offset = _scale_offset(item, a)
+                arr = np.where(dn > 0, dn * scale + offset, np.nan).astype(np.float32)
+            with lock:
+                done[0] += 1
+                if progress:
+                    progress(done[0] / len(jobs), f"downloaded {done[0]}/{len(jobs)} band files")
+            return k, b, arr
+
+        # every band of every granule in parallel: the download is latency-bound, not CPU-bound
+        with ThreadPoolExecutor(max_workers=min(16, len(jobs))) as ex:
+            results = list(ex.map(read_band, jobs))
+        per_item: dict[int, dict[str, np.ndarray]] = defaultdict(dict)
+        for k, b, arr in results:
+            per_item[k][b] = arr
+
         refl = np.full((11, *grid.shape), np.nan, dtype=np.float32)
         scl = np.zeros(grid.shape, dtype=np.uint8)
-        n_jobs = len(items) * 12
-        done = [0]
-
-        def tick(msg: str):
-            done[0] += 1
-            if progress:
-                progress(done[0] / n_jobs, msg)
-
-        for item in items:
-            def read_band(b: str) -> tuple[str, np.ndarray]:
-                a = _asset(item, b)
-                if b == "SCL":
-                    arr = read_to_grid(a.href, grid, Resampling.nearest, dtype="uint8")
-                else:
-                    dn = read_to_grid(a.href, grid, Resampling.bilinear, dtype="float32")
-                    scale, offset = _scale_offset(item, a)
-                    arr = np.where(dn > 0, dn * scale + offset, np.nan).astype(np.float32)
-                tick(f"{item.id}: {b}")
-                return b, arr
-
-            with ThreadPoolExecutor(max_workers=6) as ex:
-                res = dict(ex.map(read_band, BAND_IDS + ["SCL"]))
+        for k in range(len(items)):                 # deterministic mosaic order (sorted item ids)
+            res = per_item[k]
             stack = np.stack([res[b] for b in BAND_IDS])
             stack[:, np.isnan(stack).any(0)] = np.nan
             hole = np.isnan(refl[0]) & ~np.isnan(stack[0])

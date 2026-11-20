@@ -33,7 +33,7 @@ Or from PowerShell in the project folder:
 .\scripts\setup.ps1          # once
 .\scripts\run.ps1            # start (add -Lan to allow other PCs on your network, -Port 8080 to change port)
 .\scripts\selfcheck.ps1 -Live   # optional: download a real scene and run the model end to end
-.\scripts\test.ps1           # optional: run the 24-test suite
+.\scripts\test.ps1           # optional: run the 29-test suite
 ```
 
 The web UI is pre-built in `frontend\dist`, so Node.js is **not** needed unless you change the UI.
@@ -61,7 +61,9 @@ One container serves the API, the model and the UI. Data persists in `.\data`; s
    - **Detection outlines**: connected clusters above the threshold; click one for probability, area and coordinates.
    - **True colour / MARIDA classes** for context (Sargassum, foam, ships, wakes and other look-alikes).
    - **Top detections** table (click to zoom) and **downloads**.
-5. **Saved areas → Run latest** re-analyses an area on the best scene of the last N days. **History** keeps every run.
+5. **Re-analyse instantly**: on a finished run, change the threshold or minimum cluster size and click **Apply**;
+   clusters and statistics are recomputed from the saved probability map in under a second (no download, no model).
+6. **Saved areas → Run latest** re-analyses an area on the best scene of the last N days. **History** keeps every run.
 
 ## 4. Configuration
 
@@ -76,6 +78,7 @@ All settings are environment variables (prefix `GLN_`) and can be placed in `.en
 | `GLN_MIN_CLUSTER_PIXELS` | `3` | smallest reported cluster (3 px = 300 m²) |
 | `GLN_MASK_LAND` / `GLN_MASK_CLOUDS` | `true` | analyse open water only |
 | `GLN_MAX_AOI_KM2` | `400` | area limit per run |
+| `GLN_CACHE_MAX_GB` | `5` | local imagery cache; re-runs of the same area + scene skip the download (`0` disables) |
 | `GLN_DEVICE` | `cpu` | `cuda` if you later add an NVIDIA GPU (install the CUDA PyTorch build) |
 | `GLN_TORCH_THREADS`, `GLN_BATCH_SIZE`, `GLN_TILE_OVERLAP` | `0`, `4`, `64` | performance tuning |
 | `GLN_API_KEY` | empty | if set, every API call needs `X-API-Key` (the UI asks once) |
@@ -89,7 +92,7 @@ backend/
   app/imagery/       stac.py, gee.py, upload.py (providers), masks.py (SCL/spectral water-cloud-land masks), geo.py
   app/pipeline/      runner.py (scene → pixels → model → masks → products), outputs.py (PNG/GeoTIFF/GeoJSON)
   app/api/routes.py  REST API        app/jobs.py  background queue        app/db.py  SQLite models
-  app/selfcheck.py   diagnostics     models/geolitternet_v3_seed42.pth    tests/  (24 tests)
+  app/selfcheck.py   diagnostics     models/geolitternet_v3_seed42.pth    tests/  (29 tests)
 frontend/            React + TypeScript + MapLibre (dist/ = pre-built UI)
 docs/                ARCHITECTURE.md, MODEL_NOTES.md, GEE_SETUP.md, API.md
 scripts/             setup / run / test / selfcheck / build-ui (PowerShell + bash)

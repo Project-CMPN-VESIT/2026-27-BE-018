@@ -16,7 +16,7 @@ from ..db import Run, now, session
 from ..imagery.base import ProviderError, SceneInfo
 from ..imagery.geo import aoi_mask, area_km2
 from ..imagery.masks import build_mask
-from ..imagery.registry import get_provider
+from ..imagery.registry import collection_of, get_provider, scene_cache
 from ..ml.engine import MARIDA_CLASSES, ModelEngine
 from . import outputs as out
 
@@ -38,6 +38,11 @@ def pick_best_scene(scenes: list[SceneInfo]) -> Optional[SceneInfo]:
         return (cov < 0.5, round(cloud + (1 - cov) * 100, 1), -_ts(s.datetime))
 
     return sorted(scenes, key=score)[0]
+
+
+def _opt(params: dict, key: str, default):
+    v = params.get(key)
+    return default if v is None else v
 
 
 def _ts(iso: str) -> float:
@@ -105,10 +110,20 @@ def execute(run_id: str, engine: ModelEngine) -> None:
                                     f"{start} and {end} - widen the date range or raise the cloud limit")
             scene_id = chosen.id
 
-        # 2) pixels
-        pg.set("fetching", 0.05, "downloading Sentinel-2 bands", force=True)
+        # 2) pixels (served from the on-disk scene cache when this exact area + scene was fetched before)
         t0 = time.time()
-        data = provider.load(scene_id, aoi, pg.span("fetching", 0.05, 0.45))
+        cache = scene_cache() if provider_name != "upload" else None
+        ckey = cache.key(provider_name, collection_of(provider_name), scene_id, aoi) if cache else ""
+        data = cache.get(ckey) if cache else None
+        from_cache = data is not None
+        if from_cache:
+            pg.set("fetching", 0.40, "imagery loaded from local cache", force=True)
+        else:
+            pg.set("fetching", 0.05, "downloading Sentinel-2 bands", force=True)
+            data = provider.load(scene_id, aoi, pg.span("fetching", 0.05, 0.45))
+            if cache:
+                pg.set("fetching", 0.45, "saving imagery to local cache", force=True)
+                cache.put(ckey, data)
         fetch_s = time.time() - t0
         scene = data.scene if data.scene.id else (chosen or data.scene)
         if chosen and chosen.cloud_cover is not None and scene.cloud_cover is None:
@@ -118,16 +133,18 @@ def execute(run_id: str, engine: ModelEngine) -> None:
             r.scene_id, r.scene = scene_id, scene.to_dict()
             db.commit()
 
-        # 3) model
-        pg.set("inferring", 0.45, "running GeoLitterNet", force=True)
-        res = engine.predict(data.reflectance, pg.span("inferring", 0.45, 0.88))
+        # 3) masks first, so the model only runs on tiles that contain analysable water
+        inside = aoi_mask(aoi, data.grid)
+        mask = build_mask(data.reflectance, data.scl, inside, mask_clouds=_opt(params, "mask_clouds", s.mask_clouds),
+                          mask_land=_opt(params, "mask_land", s.mask_land), max_hole_fill_px=s.max_hole_fill_px)
 
-        # 4) masks + products
+        # 4) model
+        pg.set("inferring", 0.45, "running GeoLitterNet", force=True)
+        res = engine.predict(data.reflectance, pg.span("inferring", 0.45, 0.88), needed=mask.valid)
+
+        # 5) products
         pg.set("rendering", 0.9, "building heatmap and detections", force=True)
         t1 = time.time()
-        inside = aoi_mask(aoi, data.grid)
-        mask = build_mask(data.reflectance, data.scl, inside, mask_clouds=params.get("mask_clouds", s.mask_clouds),
-                          mask_land=params.get("mask_land", s.mask_land), max_hole_fill_px=s.max_hole_fill_px)
         prob, valid, grid = res.debris_prob, mask.valid, data.grid
         min_px = int(params.get("min_cluster_pixels", s.min_cluster_pixels))
         det = out.detections(prob, valid, res.class_map, grid, threshold, min_px)
@@ -148,7 +165,7 @@ def execute(run_id: str, engine: ModelEngine) -> None:
         out.write_geotiff(np.where(valid, res.class_map, 255).astype(np.uint8), grid, d / "classes.tif", 255,
                           ["MARIDA class index"], {**tags, "classes": "|".join(MARIDA_CLASSES)})
 
-        # 5) stats
+        # 6) stats
         px_m2 = abs(grid.transform.a * grid.transform.e)
         n_valid = int(valid.sum())
         hit = (prob >= threshold) & valid
@@ -175,7 +192,8 @@ def execute(run_id: str, engine: ModelEngine) -> None:
             "grid": {"crs": grid.crs, "width": grid.width, "height": grid.height, "res_m": abs(grid.transform.a)},
             "timing_s": {"fetch": round(fetch_s, 1), "inference": round(res.seconds, 1),
                          "render": round(time.time() - t1, 1), "total": round(time.time() - t_start, 1)},
-            "tiles": res.tiles, "model_sha256": engine.sha256, "warnings": warnings,
+            "tiles": res.tiles, "tiles_skipped": res.tiles_skipped, "from_cache": from_cache,
+            "model_sha256": engine.sha256, "warnings": warnings,
         }
         out.write_json({"run_id": run_id, "scene": scene.to_dict(), "params": params, "stats": stats,
                         "top_detections": [f["properties"] for f in det["features"][:25]]}, d / "report.json")

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError, apiKey, fileUrl, type AOI, type Detection, type Info, type Polygon, type Run } from "./api";
+import { api, ApiError, apiKey, detVersion, fileUrl, type AOI, type Detection, type Info, type Polygon, type Run } from "./api";
 import { DetectPanel } from "./DetectPanel";
 import { bboxOf, rectPolygon } from "./geo";
 import { AreasPanel, HistoryPanel } from "./ListsPanels";
@@ -74,7 +74,7 @@ export default function App() {
         if (r.status === "done" || r.status === "failed") {
           refreshRuns(); refreshAois();
           if (r.status === "done" && r.layers) {
-            const gj = await (await fetch(await fileUrl(r.layers.detections.url))).json();
+            const gj = await (await fetch(await fileUrl(r.layers.detections.url + detVersion(r)))).json();
             if (!stop) setDetections(gj.features.map((f: any) => f.properties as Detection));
             if (fittedRun.current !== r.id) { fittedRun.current = r.id; mapRef.current?.fitBounds(bboxOf(r.geometry)); }
             if (r.stats) toast(`${r.stats.clusters} debris cluster${r.stats.clusters === 1 ? "" : "s"} found`, "ok");
@@ -179,6 +179,16 @@ export default function App() {
         {drawing && <div className="draw-hint">Click and drag to draw the area · <button className="link" onClick={() => setDrawing(false)}>cancel</button></div>}
         {run && (
           <ResultPanel run={run} detections={detections} layers={layers} setLayers={setLayers}
+            onReprocessed={async (r) => {
+              setRun(r);
+              try {
+                const gj = await (await fetch(await fileUrl(r.layers!.detections.url + detVersion(r)))).json();
+                setDetections(gj.features.map((f: any) => f.properties as Detection));
+              } catch (e: any) { toast(e.message, "error"); }
+              refreshRuns(); refreshAois();
+              toast(`Re-analysed in ${r.stats?.reprocess_s ?? "<1"} s: ${r.stats?.clusters} clusters`, "ok");
+            }}
+            toast={toast}
             onFly={(d) => mapRef.current?.flyTo(d.lon, d.lat, 15)} onClose={() => setRunId(null)} />
         )}
         <div className="toasts">

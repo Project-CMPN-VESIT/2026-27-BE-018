@@ -182,3 +182,27 @@ def test_stac_earthsearch_offset_already_applied(tmp_path):
     data = prov.load("S2A_X", aoi)
     assert not np.isnan(data.reflectance).all()
     np.testing.assert_allclose(np.nanmedian(data.reflectance[3]), synth.WATER[3], atol=0.003)
+
+
+def test_read_to_grid_other_utm_zone_matches_native(tmp_path):
+    """Regression for 'Chunk and warp failed': a granule stored in a neighbouring UTM zone is read natively
+    and warped in memory; values must match reading the same data in the grid's own CRS."""
+    import rasterio
+    from rasterio.enums import Resampling
+    from rasterio.warp import calculate_default_transform, reproject
+    from app.imagery.base import read_to_grid
+    refl, _, _ = synth.scene(200, 260)
+    band = (refl[3] * 10000).astype(np.float32)
+    native = synth.write_tif(tmp_path / "native.tif", band)
+    b = rasterio.transform.array_bounds(200, 260, synth.transform())
+    tr, w, h = calculate_default_transform(synth.CRS, "EPSG:32617", 260, 200, *b, resolution=10)
+    other = np.zeros((h, w), np.float32)
+    reproject(band, other, src_transform=synth.transform(), src_crs=synth.CRS, dst_transform=tr, dst_crs="EPSG:32617",
+              resampling=Resampling.bilinear)
+    foreign = synth.write_tif(tmp_path / "zone17.tif", other, crs="EPSG:32617", tr=tr)
+    aoi = parse_geometry(synth.bbox_lonlat(200, 260, 30))
+    grid = grid_for(aoi, "EPSG:32616")
+    a = read_to_grid(str(native), grid, Resampling.bilinear)
+    c = read_to_grid(str(foreign), grid, Resampling.bilinear)
+    assert c.shape == a.shape and (c > 0).mean() > 0.99
+    assert abs(float(np.median(c)) - float(np.median(a))) < 5          # DN units (reflectance x 1e4)

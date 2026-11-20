@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import maplibregl, { GeoJSONSource, LngLatBoundsLike, Map as MLMap, StyleSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { fileUrl, type AOI, type Detection, type Polygon, type Run } from "./api";
+import { detVersion, fileUrl, type AOI, type Detection, type Polygon, type Run } from "./api";
 import { fmt, rectPolygon, type BBox, type LngLat } from "./geo";
 
 export type Basemap = "satellite" | "dark";
@@ -233,9 +233,9 @@ export const MapView = forwardRef<MapHandle, Props>(function MapView(p, ref) {
     const lay = p.run?.status === "done" ? p.run.layers?.detections : null;
     if (!lay) { src.setData(EMPTY); return; }
     let cancelled = false;
-    fileUrl(lay.url).then((u) => { if (!cancelled) src.setData(u); }).catch(() => src.setData(EMPTY));
+    fileUrl(lay.url + detVersion(p.run!)).then((u) => { if (!cancelled) src.setData(u); }).catch(() => src.setData(EMPTY));
     return () => { cancelled = true; };
-  }, [p.run?.id, p.run?.status, ready]);
+  }, [p.run?.id, p.run?.status, p.run?.stats?.threshold, p.run?.stats?.min_cluster_pixels, ready]);
 
   // ---------------------------------------------------------------- layer visibility / opacity
   useEffect(() => {

@@ -180,3 +180,10 @@ table.dets { width: 100%; border-collapse: collapse; font-size: 12.5px; }
   .basemap-toggle { bottom: auto; top: 12px; }
   .brand .collapse, .reopen { display: none; }
 }
+
+.timing { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.timing span { font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 99px; padding: 3px 9px; color: var(--muted); }
+.timing b.cached { color: var(--ok); font-weight: 600; }
+.reproc { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end; }
+.reproc .field { margin: 0; }
+.reproc button { margin-bottom: 2px; }

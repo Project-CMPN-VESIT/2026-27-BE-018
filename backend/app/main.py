@@ -43,6 +43,7 @@ async def lifespan(app: FastAPI):
         for name in ("", "uvicorn"):   # uvicorn's logger does not propagate to root
             logging.getLogger(name).addHandler(fh)
     logging.getLogger().setLevel(s.log_level)
+    logging.getLogger("rasterio.session").setLevel(logging.WARNING)   # "boto3 not available" spam on every file open
     init_db()
     engine = ModelEngine(s.model_path, s.device, s.torch_threads, s.batch_size, s.tile_overlap)
     engine.load()

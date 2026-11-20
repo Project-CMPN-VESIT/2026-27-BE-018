@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     mask_land: bool = True
     max_hole_fill_px: int = 2500      # floating objects inside water up to 0.25 km^2 are kept as "water"
 
+    # --- imagery cache (re-runs of the same area + scene skip the download) ---
+    cache_max_gb: float = 5.0         # 0 disables the cache
+
     # --- request limits ---
     max_aoi_km2: float = 400.0
     max_upload_mb: int = 1024
@@ -57,6 +60,10 @@ class Settings(BaseSettings):
     @property
     def runs_dir(self) -> Path:
         return self.data_dir / "runs"
+
+    @property
+    def cache_dir(self) -> Path:
+        return self.data_dir / "cache"
 
     @property
     def uploads_dir(self) -> Path:

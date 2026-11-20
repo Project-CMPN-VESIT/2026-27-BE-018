@@ -5,6 +5,7 @@ from functools import lru_cache
 
 from ..config import get_settings
 from .base import ImageryProvider, ProviderError
+from .cache import SceneCache
 from .gee import GeeProvider
 from .stac import StacProvider
 from .upload import UploadProvider
@@ -34,3 +35,14 @@ def upload_provider() -> UploadProvider:
     p = providers()["upload"]
     assert isinstance(p, UploadProvider)
     return p
+
+
+@lru_cache
+def scene_cache() -> SceneCache:
+    s = get_settings()
+    return SceneCache(s.cache_dir, s.cache_max_gb)
+
+
+def collection_of(name: str) -> str:
+    s = get_settings()
+    return {"stac": f"{s.stac_url}#{s.stac_collection}", "gee": s.gee_collection}.get(name, name)

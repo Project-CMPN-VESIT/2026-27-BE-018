@@ -36,6 +36,7 @@ class InferenceResult:
     class_conf: np.ndarray    # (H, W) float32, max softmax probability
     seconds: float
     tiles: int
+    tiles_skipped: int = 0
 
 
 def _blend_window(size: int) -> np.ndarray:
@@ -79,8 +80,14 @@ class ModelEngine:
     def loaded(self) -> bool:
         return self.model is not None
 
-    def predict(self, reflectance_11: np.ndarray, progress: Optional[ProgressFn] = None) -> InferenceResult:
-        """reflectance_11: (11, H, W) surface reflectance with NaN for no-data. Any H, W >= 1."""
+    def predict(self, reflectance_11: np.ndarray, progress: Optional[ProgressFn] = None,
+                needed: Optional[np.ndarray] = None) -> InferenceResult:
+        """reflectance_11: (11, H, W) surface reflectance with NaN for no-data. Any H, W >= 1.
+
+        needed: optional (H, W) bool mask of pixels whose prediction will be used (open water inside the AOI).
+        Tiles containing none of them are skipped. Results for needed pixels are identical to a full run: every
+        tile that overlaps a needed pixel is still computed and blended exactly as before.
+        """
         if self.model is None:
             raise RuntimeError("model not loaded")
         t0 = time.time()
@@ -99,8 +106,15 @@ class ModelEngine:
         win = _blend_window(TILE) if self.overlap > 0 else np.ones((TILE, TILE), np.float32)
 
         coords = [(r, c) for r in range(0, ph - TILE + 1, stride) for c in range(0, pw - TILE + 1, stride)]
+        all_tiles = len(coords)
+        if needed is not None:
+            nd = np.zeros((ph, pw), bool)
+            nd[:H, :W] = needed
+            coords = [(r, c) for r, c in coords if nd[r:r + TILE, c:c + TILE].any()]
         total = len(coords)
         with self._lock, torch.inference_mode():
+            if total == 0 and progress:
+                progress(1.0, "no water to analyse")
             for i in range(0, total, self.batch_size):
                 chunk = coords[i:i + self.batch_size]
                 batch = np.stack([xp[:, r:r + TILE, c:c + TILE] for r, c in chunk])
@@ -119,4 +133,5 @@ class ModelEngine:
             class_conf=probs.max(0).astype(np.float32),
             seconds=time.time() - t0,
             tiles=total,
+            tiles_skipped=all_tiles - total,
         )

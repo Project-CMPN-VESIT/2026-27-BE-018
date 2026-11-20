@@ -17,11 +17,11 @@ from ..config import get_settings
 from ..db import AOI, Run, get_db, latest_run_for
 from ..imagery.base import ProviderError
 from ..imagery.geo import area_km2, parse_geometry
-from ..imagery.registry import get_provider, providers, upload_provider
+from ..imagery.registry import get_provider, providers, scene_cache, upload_provider
 from ..ml.engine import MARIDA_CLASSES, TILE
 from ..ml.preprocess import BANDS, INDEX_NAMES
 from ..pipeline.runner import run_dir
-from ..schemas import AOIIn, AOIPatch, AOIRunIn, RunIn, SceneSearchIn
+from ..schemas import AOIIn, AOIPatch, AOIRunIn, ReprocessIn, RunIn, SceneSearchIn
 
 RUN_FILES = {
     "heatmap.png": "image/png", "rgb.png": "image/png", "classes.png": "image/png",
@@ -64,6 +64,7 @@ def info(request: Request) -> dict[str, Any]:
                      "min_cluster_pixels": s.min_cluster_pixels, "mask_land": s.mask_land, "mask_clouds": s.mask_clouds},
         "limits": {"max_aoi_km2": s.max_aoi_km2, "max_upload_mb": s.max_upload_mb},
         "queue": {"running": jobs.current, "waiting": jobs.q.qsize()},
+        "cache": scene_cache().stats(),
     }
 
 
@@ -184,6 +185,32 @@ def delete_run(run_id: str, request: Request, db: Session = Depends(get_db)) -> 
     db.delete(r)
     db.commit()
     shutil.rmtree(run_dir(run_id), ignore_errors=True)
+
+
+@router.post("/runs/{run_id}/reprocess")
+def reprocess_run(run_id: str, body: ReprocessIn, db: Session = Depends(get_db)) -> dict:
+    """Re-cluster a finished run with a new threshold / minimum cluster size (no download, no model; ~1 s)."""
+    from ..pipeline.reprocess import recluster
+    r = db.get(Run, run_id)
+    if r is None:
+        raise HTTPException(404, "run not found")
+    if r.status != "done" or not r.stats:
+        raise HTTPException(409, "only finished runs can be re-analysed")
+    if not (run_dir(run_id) / "probability.tif").exists():
+        raise HTTPException(410, "this run's probability map is missing; run it again")
+    min_px = body.min_cluster_pixels or int(r.stats.get("min_cluster_pixels") or get_settings().min_cluster_pixels)
+    stats, _ = recluster(run_id, r.stats, body.threshold, min_px)
+    r.stats = stats
+    r.params = {**(r.params or {}), "threshold": body.threshold, "min_cluster_pixels": min_px}
+    r.message = f"{stats['clusters']} debris clusters"
+    db.commit()
+    return r.to_dict()
+
+
+@router.delete("/cache", status_code=204)
+def clear_cache() -> None:
+    """Delete all locally cached imagery (next runs download again)."""
+    scene_cache().clear()
 
 
 @router.get("/runs/{run_id}/files/{name}")

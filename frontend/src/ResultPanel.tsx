@@ -1,4 +1,5 @@
-import { apiKey, fileUrl, type Detection, type Run } from "./api";
+import { useEffect, useState } from "react";
+import { api, apiKey, detVersion, fileUrl, type Detection, type Run } from "./api";
 import { fmt } from "./geo";
 import type { LayerState } from "./MapView";
 import { StatusChip } from "./ListsPanels";
@@ -17,6 +18,8 @@ interface Props {
   setLayers(l: LayerState): void;
   onFly(d: Detection): void;
   onClose(): void;
+  onReprocessed(r: Run): void;
+  toast(msg: string, kind?: "error" | "ok"): void;
 }
 
 async function download(url: string, name: string) {
@@ -26,8 +29,19 @@ async function download(url: string, name: string) {
   document.body.appendChild(a); a.click(); a.remove();
 }
 
-export function ResultPanel({ run, detections, layers, setLayers, onFly, onClose }: Props) {
+export function ResultPanel({ run, detections, layers, setLayers, onFly, onClose, onReprocessed, toast }: Props) {
   const st = run.stats;
+  const [thr, setThr] = useState(st?.threshold ?? 0.5);
+  const [minPx, setMinPx] = useState(st?.min_cluster_pixels ?? 3);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { setThr(st?.threshold ?? 0.5); setMinPx(st?.min_cluster_pixels ?? 3); }, [run.id, st?.threshold, st?.min_cluster_pixels]);
+  const changed = !!st && (Math.abs(thr - st.threshold) > 1e-6 || minPx !== st.min_cluster_pixels);
+  const reprocess = async () => {
+    setBusy(true);
+    try { onReprocessed(await api.reprocess(run.id, { threshold: thr, min_cluster_pixels: minPx })); }
+    catch (e: any) { toast(e.message, "error"); }
+    finally { setBusy(false); }
+  };
   const running = run.status !== "done" && run.status !== "failed";
   const L = layers;
   const set = (patch: Partial<LayerState>) => setLayers({ ...L, ...patch });
@@ -76,6 +90,23 @@ export function ResultPanel({ run, detections, layers, setLayers, onFly, onClose
           </div>
           {st.warnings.map((w) => <div key={w} className="alert warn">{w}</div>)}
 
+          <div className="timing">
+            <span title="time to get the imagery">Imagery {st.from_cache ? <b className="cached">cached</b> : `${st.timing_s.fetch}s`}</span>
+            <span title="model time">Model {st.timing_s.inference}s · {st.tiles} tiles{st.tiles_skipped ? ` (${st.tiles_skipped} skipped: no water)` : ""}</span>
+            <span title="total">Total {st.timing_s.total}s</span>
+          </div>
+
+          <h4>Re-analyse instantly <span className="muted small">(no download, no model)</span></h4>
+          <div className="reproc">
+            <label className="field">Threshold <b>{thr.toFixed(2)}</b>
+              <input type="range" min={0.1} max={0.95} step={0.05} value={thr} onChange={(e) => setThr(Number(e.target.value))} />
+            </label>
+            <label className="field">Min cluster <b>{minPx} px</b>
+              <input type="range" min={1} max={30} step={1} value={minPx} onChange={(e) => setMinPx(Number(e.target.value))} />
+            </label>
+            <button className="primary" disabled={!changed || busy} onClick={reprocess}>{busy ? "…" : "Apply"}</button>
+          </div>
+
           <h4>Layers</h4>
           <div className="layers">
             <label className="check"><input type="checkbox" checked={L.density} onChange={(e) => set({ density: e.target.checked })} /> Debris density heatmap</label>
@@ -112,14 +143,14 @@ export function ResultPanel({ run, detections, layers, setLayers, onFly, onClose
 
           <h4>Downloads</h4>
           <div className="btn-row">
-            <button onClick={() => download(`/api/runs/${run.id}/files/detections.geojson`, `gln_${run.id}_detections.geojson`)}>Detections GeoJSON</button>
+            <button onClick={() => download(`/api/runs/${run.id}/files/detections.geojson${detVersion(run)}`, `gln_${run.id}_detections.geojson`)}>Detections GeoJSON</button>
             <button onClick={() => download(`/api/runs/${run.id}/files/probability.tif`, `gln_${run.id}_probability.tif`)}>Probability GeoTIFF</button>
             <button onClick={() => download(`/api/runs/${run.id}/files/classes.tif`, `gln_${run.id}_classes.tif`)}>Classes GeoTIFF</button>
-            <button onClick={() => download(`/api/runs/${run.id}/files/report.json`, `gln_${run.id}_report.json`)}>Report JSON</button>
+            <button onClick={() => download(`/api/runs/${run.id}/files/report.json${detVersion(run)}`, `gln_${run.id}_report.json`)}>Report JSON</button>
           </div>
           <p className="muted tiny">
-            {run.provider.toUpperCase()} · {run.scene?.tiles?.join(", ")} · {st.tiles} tiles in {st.timing_s.total}s
-            (download {st.timing_s.fetch}s, model {st.timing_s.inference}s) · mask: {st.mask_method}
+            {run.provider.toUpperCase()} · {run.scene?.tiles?.join(", ")} · download {st.timing_s.fetch}s · model {st.timing_s.inference}s
+            · render {st.timing_s.render}s · mask: {st.mask_method}
             {apiKey.get() ? " · authenticated" : ""}
           </p>
         </>

@@ -71,7 +71,7 @@ def render_heatmap(prob: np.ndarray, valid: np.ndarray, grid: Grid, path: Path, 
     rgba = np.zeros((*pm.shape, 4), np.uint8)
     rgba[..., :3] = HEAT_LUT[(t * 255).astype(np.uint8)]
     rgba[..., 3] = np.where(ok & (pm >= floor), (60 + 195 * np.sqrt(t)).astype(np.uint8), 0)
-    Image.fromarray(rgba, "RGBA").save(path, optimize=True)
+    Image.fromarray(rgba, "RGBA").save(path, compress_level=3)
     return mercator_corners_lonlat(b)
 
 
@@ -92,7 +92,7 @@ def render_rgb(refl: np.ndarray, inside: np.ndarray, grid: Grid, path: Path) -> 
     for c in range(3):
         out[..., c] = (np.clip(chans[c], 0, 1) * 255).astype(np.uint8)
     out[..., 3] = alpha * 255
-    Image.fromarray(out, "RGBA").save(path, optimize=True)
+    Image.fromarray(out, "RGBA").save(path, compress_level=3)
     return mercator_corners_lonlat(b)
 
 
@@ -102,7 +102,7 @@ def render_classes(cls: np.ndarray, valid: np.ndarray, grid: Grid, path: Path) -
     pal = np.zeros((256, 4), np.uint8)
     for i, col in enumerate(CLASS_COLORS):
         pal[i] = (*col, 200)
-    Image.fromarray(pal[cm], "RGBA").save(path, optimize=True)
+    Image.fromarray(pal[cm], "RGBA").save(path, compress_level=3)
     return mercator_corners_lonlat(b)
 
 

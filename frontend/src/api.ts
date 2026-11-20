@@ -21,6 +21,7 @@ export interface RunStats {
   mask_method: string; threshold: number; min_cluster_pixels: number; debris_pixels: number; debris_area_m2: number;
   clusters: number; max_prob: number; mean_prob: number; class_fractions: Record<string, number>;
   timing_s: { fetch: number; inference: number; render: number; total: number }; tiles: number; warnings: string[];
+  tiles_skipped?: number; from_cache?: boolean; reprocess_s?: number;
 }
 export type RunStatus = "queued" | "searching" | "fetching" | "inferring" | "rendering" | "done" | "failed";
 export interface Run {
@@ -85,6 +86,7 @@ export const api = {
   run: (id: string) => req<Run>("GET", `/api/runs/${id}`),
   runs: (aoiId?: string, limit = 50) => req<Run[]>("GET", `/api/runs?limit=${limit}${aoiId ? `&aoi_id=${aoiId}` : ""}`),
   deleteRun: (id: string) => req<void>("DELETE", `/api/runs/${id}`),
+  reprocess: (id: string, b: { threshold: number; min_cluster_pixels: number }) => req<Run>("POST", `/api/runs/${id}/reprocess`, b),
   aois: () => req<AOI[]>("GET", "/api/aois"),
   createAoi: (b: { name: string; geometry: Polygon; notes?: string }) => req<AOI>("POST", "/api/aois", b),
   patchAoi: (id: string, b: { name?: string; notes?: string }) => req<AOI>("PATCH", `/api/aois/${id}`, b),
@@ -101,3 +103,6 @@ export const api = {
   },
   deleteUpload: (id: string) => req<void>("DELETE", `/api/uploads/${id}`),
 };
+
+/** Cache-busting version for files that change when a run is re-analysed (detections.geojson). */
+export const detVersion = (r: Run) => `?v=${r.stats?.threshold ?? ""}-${r.stats?.min_cluster_pixels ?? ""}`;

@@ -58,3 +58,8 @@ class AOIRunIn(BaseModel):
     days_back: int = Field(30, ge=1, le=365)
     max_cloud: float = Field(30, ge=0, le=100)
     threshold: Optional[float] = Field(None, ge=0.05, le=0.99)
+
+
+class ReprocessIn(BaseModel):
+    threshold: float = Field(..., ge=0.05, le=0.99)
+    min_cluster_pixels: Optional[int] = Field(None, ge=1, le=10000)
